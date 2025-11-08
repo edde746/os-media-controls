@@ -1,0 +1,142 @@
+# os_media_controls
+
+Flutter plugin for OS-level media controls on iOS, macOS, Android, and Windows. Displays rich media info in system UI and handles control events from lock screens, notifications, media keys, etc.
+
+## Features
+
+- Cross-platform: iOS, macOS, Android, Windows
+- Metadata: Title, artist, album, artwork, duration
+- Controls: Play/pause/next/prev/seek/speed
+- Integration: Lock screen, Control Center, notifications, CarPlay, Android Auto, media keys
+- Advanced: Custom skips (15/30s), queue display, speed control, position updates
+
+## Platform Support
+
+| Platform | Min Version | Notes |
+|----------|-------------|-------|
+| iOS     | 12.0+      | CarPlay, Siri, AirPlay |
+| macOS   | 10.14+     | Control Center |
+| Android | API 21+    | MediaSession, Auto/Wear |
+| Windows | 10+        | SMTC (partial) |
+
+## Installation
+
+In `pubspec.yaml`:
+
+```yaml
+dependencies:
+  os_media_controls: ^0.0.1
+```
+
+Run: `flutter pub get`
+
+## Platform Setup
+
+### iOS
+
+Add to `Info.plist`:
+
+```xml
+<key>UIBackgroundModes</key>
+<array><string>audio</string></array>
+```
+
+Update `AppDelegate.swift`:
+
+```swift
+import AVFoundation
+
+// In didFinishLaunchingWithOptions:
+do {
+  let session = AVAudioSession.sharedInstance()
+  try session.setCategory(.playback, mode: .default)
+  try session.setActive(true)
+} catch { print("Error: \(error)") }
+application.beginReceivingRemoteControlEvents()
+```
+
+Plugin uses silent audio for controls visibility without real playback.
+
+### macOS
+
+No extra setup.
+
+### Android
+
+Add to `AndroidManifest.xml`:
+
+```xml
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+```
+
+Use foreground service for background playback.
+
+### Windows
+
+Uses SMTC; requires WinRT/C++ for full integration (basic structure provided).
+
+## Usage
+
+Import: `package:os_media_controls/os_media_controls.dart`
+
+Listen to events:
+
+```dart
+OsMediaControls.controlEvents.listen((event) {
+  if (event is PlayEvent) { play(); }
+  // Handle others: Pause, Next, Prev, Seek, etc.
+});
+```
+
+Set metadata:
+
+```dart
+await OsMediaControls.setMetadata(MediaMetadata(
+  title: 'Title', artist: 'Artist', duration: Duration(minutes: 3),
+  artwork: imageBytes,  // Uint8List
+));
+```
+
+Set state:
+
+```dart
+await OsMediaControls.setPlaybackState(MediaPlaybackState(
+  state: PlaybackState.playing, position: Duration(seconds: 30), speed: 1.0,
+));
+```
+
+Update position periodically during playback.
+
+Clear: `await OsMediaControls.clear();`
+
+### Advanced
+
+Skips (iOS/macOS):
+
+```dart
+await OsMediaControls.setSkipIntervals(forward: Duration(seconds: 15), backward: Duration(seconds: 15));
+```
+
+Queue (iOS/macOS): `await OsMediaControls.setQueueInfo(currentIndex: 2, queueLength: 12);`
+
+Enable/disable: `await OsMediaControls.enableControls([MediaControl.play, MediaControl.pause]);`
+
+## API Reference
+
+### OsMediaControls Methods
+
+- `setMetadata(MediaMetadata)`: Update metadata
+- `setPlaybackState(MediaPlaybackState)`: Update state/position/speed
+- `enableControls(List<MediaControl>)` / `disableControls(List<MediaControl>)`
+- `setSkipIntervals({Duration? forward, backward})`
+- `setQueueInfo({int currentIndex, queueLength})`
+- `clear()`
+- `controlEvents`: Stream<MediaControlEvent> (PlayEvent, PauseEvent, SeekEvent, etc.)
+
+### Models
+
+- `MediaMetadata`: title (req), artist, album, duration, artwork (Uint8List)
+- `MediaPlaybackState`: state (PlaybackState: none/stopped/paused/playing/buffering), position (req), speed
+- `MediaControl`: play/pause/stop/next/prev/seek/skipForward/skipBackward/changeSpeed
+- Events: PlayEvent, SeekEvent (position), SkipForwardEvent (interval), etc.

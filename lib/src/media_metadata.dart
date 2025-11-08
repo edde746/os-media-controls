@@ -1,0 +1,77 @@
+import 'dart:typed_data';
+
+/// Metadata for the currently playing media.
+///
+/// This information is displayed in system media controls like the lock screen,
+/// notification area, and control center.
+class MediaMetadata {
+  /// The title of the media item (e.g., song name, video title)
+  final String title;
+
+  /// The artist or creator of the media item
+  final String? artist;
+
+  /// The album or collection name
+  final String? album;
+
+  /// The album artist (if different from the track artist)
+  final String? albumArtist;
+
+  /// The total duration of the media item
+  final Duration? duration;
+
+  /// The artwork/album art as raw image bytes (PNG or JPEG)
+  ///
+  /// For best results, use a square image of at least 512x512 pixels.
+  /// The image will be converted to the appropriate format for each platform.
+  final Uint8List? artwork;
+
+  const MediaMetadata({
+    required this.title,
+    this.artist,
+    this.album,
+    this.albumArtist,
+    this.duration,
+    this.artwork,
+  });
+
+  /// Converts the metadata to a map for platform channel communication
+  Map<String, dynamic> toMap() {
+    return {
+      'title': title,
+      if (artist != null) 'artist': artist,
+      if (album != null) 'album': album,
+      if (albumArtist != null) 'albumArtist': albumArtist,
+      if (duration != null) 'duration': duration!.inSeconds.toDouble(),
+      if (artwork != null) 'artwork': artwork,
+    };
+  }
+
+  @override
+  String toString() {
+    return 'MediaMetadata(title: $title, artist: $artist, album: $album, duration: $duration)';
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+
+    return other is MediaMetadata &&
+        other.title == title &&
+        other.artist == artist &&
+        other.album == album &&
+        other.albumArtist == albumArtist &&
+        other.duration == duration;
+  }
+
+  @override
+  int get hashCode {
+    return Object.hash(
+      title,
+      artist,
+      album,
+      albumArtist,
+      duration,
+    );
+  }
+}

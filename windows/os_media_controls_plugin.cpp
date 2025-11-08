@@ -1,4 +1,4 @@
-#include "os_media_controls_plugin.h"
+#include "os_media_controls/os_media_controls_plugin.h"
 
 #include <flutter/event_channel.h>
 #include <flutter/event_stream_handler_functions.h>
@@ -6,8 +6,6 @@
 #include <flutter/plugin_registrar_windows.h>
 #include <flutter/standard_method_codec.h>
 
-#include <codecvt>
-#include <locale>
 #include <memory>
 #include <sstream>
 
@@ -134,7 +132,7 @@ void OsMediaControlsPlugin::InitializeSMTC(HWND hwnd) {
           SendEvent(event);
         });
 
-  } catch (winrt::hresult_error const &ex) {
+  } catch (winrt::hresult_error const &) {
     // Log error but don't crash - SMTC may not be available on all Windows
     // versions
   }
@@ -266,7 +264,7 @@ void OsMediaControlsPlugin::SetMetadata(const flutter::EncodableValue *args) {
     // Apply updates
     updater.Update();
 
-  } catch (winrt::hresult_error const &ex) {
+  } catch (winrt::hresult_error const &) {
     // Ignore metadata update errors
   }
 }
@@ -318,7 +316,7 @@ void OsMediaControlsPlugin::SetPlaybackState(
     // Set playback rate
     smtc_.PlaybackRate(speed);
 
-  } catch (winrt::hresult_error const &ex) {
+  } catch (winrt::hresult_error const &) {
     // Ignore playback state update errors
   }
 }
@@ -374,7 +372,7 @@ void OsMediaControlsPlugin::EnableControl(const std::string &control) {
       smtc_.IsPreviousEnabled(true);
     }
     // Note: Windows doesn't have separate seek control enable
-  } catch (winrt::hresult_error const &ex) {
+  } catch (winrt::hresult_error const &) {
     // Ignore enable errors
   }
 }
@@ -395,7 +393,7 @@ void OsMediaControlsPlugin::DisableControl(const std::string &control) {
     } else if (control == "previous") {
       smtc_.IsPreviousEnabled(false);
     }
-  } catch (winrt::hresult_error const &ex) {
+  } catch (winrt::hresult_error const &) {
     // Ignore disable errors
   }
 }
@@ -404,9 +402,17 @@ winrt::hstring OsMediaControlsPlugin::StringToHString(const std::string &str) {
   if (str.empty())
     return winrt::hstring();
 
-  // Convert UTF-8 std::string to wide string
-  std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
-  std::wstring wide = converter.from_bytes(str);
+  // Convert UTF-8 std::string to wide string using Windows API
+  int size_needed = MultiByteToWideChar(CP_UTF8, 0, str.c_str(),
+                                        static_cast<int>(str.length()),
+                                        nullptr, 0);
+  if (size_needed <= 0)
+    return winrt::hstring();
+
+  std::wstring wide(size_needed, 0);
+  MultiByteToWideChar(CP_UTF8, 0, str.c_str(),
+                      static_cast<int>(str.length()),
+                      &wide[0], size_needed);
 
   return winrt::hstring(wide);
 }
@@ -438,7 +444,7 @@ OsMediaControlsPlugin::CreateStreamReferenceFromBytes(
     // Create stream reference
     return RandomAccessStreamReference::CreateFromStream(stream);
 
-  } catch (winrt::hresult_error const &ex) {
+  } catch (winrt::hresult_error const &) {
     return nullptr;
   }
 }

@@ -19,7 +19,7 @@ set(PLUGIN_NAME "os_media_controls_plugin")
 # Any new source files that you add to the plugin should be added here.
 list(APPEND PLUGIN_SOURCES
   "os_media_controls_plugin.cpp"
-  "os_media_controls_plugin.h"
+  "include/os_media_controls/os_media_controls_plugin.h"
 )
 
 # Define the plugin library target. Its name must not be changed (see comment
@@ -45,6 +45,8 @@ target_compile_definitions(${PLUGIN_NAME} PRIVATE FLUTTER_PLUGIN_IMPL)
 # Source include directories and library dependencies. Add any plugin-specific
 # dependencies here.
 target_include_directories(${PLUGIN_NAME} INTERFACE
+  "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_include_directories(${PLUGIN_NAME} PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(${PLUGIN_NAME} PRIVATE
   flutter

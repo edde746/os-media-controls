@@ -5,6 +5,7 @@
 #include <flutter/plugin_registrar_windows.h>
 #include <flutter/event_channel.h>
 #include <flutter/event_stream_handler_functions.h>
+#include <flutter/encodable_value.h>
 
 #include <memory>
 #include <string>

@@ -17,11 +17,11 @@ public class OsMediaControlsPlugin: NSObject, FlutterPlugin, FlutterStreamHandle
 
     public static func register(with registrar: FlutterPluginRegistrar) {
         let methodChannel = FlutterMethodChannel(
-            name: "com.example.os_media_controls/methods",
+            name: "com.edde746.os_media_controls/methods",
             binaryMessenger: registrar.messenger()
         )
         let eventChannel = FlutterEventChannel(
-            name: "com.example.os_media_controls/events",
+            name: "com.edde746.os_media_controls/events",
             binaryMessenger: registrar.messenger()
         )
 
@@ -194,9 +194,25 @@ public class OsMediaControlsPlugin: NSObject, FlutterPlugin, FlutterStreamHandle
         if let duration = args["duration"] as? Double {
             nowPlayingInfo[MPMediaItemPropertyPlaybackDuration] = duration
         }
-        if let artworkData = args["artwork"] as? FlutterStandardTypedData,
-           let image = UIImage(data: artworkData.data) {
-            nowPlayingInfo[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+        // Handle artwork from bytes (takes precedence over URL)
+        if let artworkData = args["artwork"] as? FlutterStandardTypedData {
+            if let image = UIImage(data: artworkData.data) {
+                nowPlayingInfo[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+            }
+        } else if let artworkUrlString = args["artworkUrl"] as? String, let artworkUrl = URL(string: artworkUrlString) {
+            // Handle artwork from URL - download asynchronously
+            URLSession.shared.dataTask(with: artworkUrl) { [weak self] data, response, error in
+                guard let self = self else { return }
+                guard error == nil, let data = data, let image = UIImage(data: data) else {
+                    return
+                }
+
+                DispatchQueue.main.async {
+                    var updatedInfo = self.nowPlayingCenter.nowPlayingInfo ?? [:]
+                    updatedInfo[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+                    self.nowPlayingCenter.nowPlayingInfo = updatedInfo
+                }
+            }.resume()
         }
 
         nowPlayingCenter.nowPlayingInfo = nowPlayingInfo
@@ -313,6 +329,25 @@ public class OsMediaControlsPlugin: NSObject, FlutterPlugin, FlutterStreamHandle
         nowPlayingCenter.nowPlayingInfo = nil
         currentMetadata.removeAll()
         stopSilentAudioIfNeeded()
+
+        // Deactivate audio session to force iOS to remove controls from Control Center
+        do {
+            try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        } catch {
+            // Audio session deactivation failed, but continue with cleanup
+        }
+
+        // Disable all command center buttons
+        let commandCenter = MPRemoteCommandCenter.shared()
+        commandCenter.playCommand.isEnabled = false
+        commandCenter.pauseCommand.isEnabled = false
+        commandCenter.togglePlayPauseCommand.isEnabled = false
+        commandCenter.nextTrackCommand.isEnabled = false
+        commandCenter.previousTrackCommand.isEnabled = false
+        commandCenter.changePlaybackPositionCommand.isEnabled = false
+        commandCenter.skipForwardCommand.isEnabled = false
+        commandCenter.skipBackwardCommand.isEnabled = false
+        commandCenter.changePlaybackRateCommand.isEnabled = false
     }
 
     // MARK: - Silent Audio Management
@@ -341,9 +376,8 @@ public class OsMediaControlsPlugin: NSObject, FlutterPlugin, FlutterStreamHandle
             silentPlayer?.numberOfLoops = -1  // Loop forever
             silentPlayer?.volume = 0.0001     // Effectively silent (can't be 0.0)
             silentPlayer?.prepareToPlay()
-            print("🔇 Silent audio player initialized successfully")
         } catch {
-            print("❌ Failed to setup silent audio player: \(error.localizedDescription)")
+            // Silent audio player setup failed
         }
     }
 
@@ -353,14 +387,12 @@ public class OsMediaControlsPlugin: NSObject, FlutterPlugin, FlutterStreamHandle
         guard !isSilentAudioPlaying else { return }
 
         guard let player = silentPlayer else {
-            print("⚠️ Silent player not initialized")
             setupSilentAudio()
             return
         }
 
         player.play()
         isSilentAudioPlaying = true
-        print("🔇 Silent audio started - Now Playing controls activated")
     }
 
     /// Stops silent audio playback if currently playing
@@ -369,7 +401,6 @@ public class OsMediaControlsPlugin: NSObject, FlutterPlugin, FlutterStreamHandle
 
         silentPlayer?.stop()
         isSilentAudioPlaying = false
-        print("🔇 Silent audio stopped - Now Playing controls will disappear")
     }
 
     private func sendEvent(_ event: [String: Any]) {

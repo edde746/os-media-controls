@@ -50,10 +50,12 @@ export 'src/media_control_event.dart';
 /// });
 /// ```
 class OsMediaControls {
-  static const MethodChannel _methodChannel =
-      MethodChannel('com.example.os_media_controls/methods');
-  static const EventChannel _eventChannel =
-      EventChannel('com.example.os_media_controls/events');
+  static const MethodChannel _methodChannel = MethodChannel(
+    'com.edde746.os_media_controls/methods',
+  );
+  static const EventChannel _eventChannel = EventChannel(
+    'com.edde746.os_media_controls/events',
+  );
 
   static Stream<MediaControlEvent>? _eventStream;
 
@@ -73,7 +75,9 @@ class OsMediaControls {
   /// - [SkipBackwardEvent]: Skip backward button pressed (iOS/macOS)
   /// - [SetSpeedEvent]: Playback speed change requested
   static Stream<MediaControlEvent> get controlEvents {
-    _eventStream ??= _eventChannel.receiveBroadcastStream().map((dynamic event) {
+    _eventStream ??= _eventChannel.receiveBroadcastStream().map((
+      dynamic event,
+    ) {
       if (event is Map) {
         return MediaControlEvent.fromMap(event);
       }

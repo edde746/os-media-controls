@@ -1,4 +1,4 @@
-package com.example.os_media_controls
+package com.edde746.os_media_controls
 
 import android.content.Context
 import android.graphics.Bitmap
@@ -31,13 +31,13 @@ class OsMediaControlsPlugin: FlutterPlugin, MethodChannel.MethodCallHandler,
 
         methodChannel = MethodChannel(
             binding.binaryMessenger,
-            "com.example.os_media_controls/methods"
+            "com.edde746.os_media_controls/methods"
         )
         methodChannel.setMethodCallHandler(this)
 
         eventChannel = EventChannel(
             binding.binaryMessenger,
-            "com.example.os_media_controls/events"
+            "com.edde746.os_media_controls/events"
         )
         eventChannel.setStreamHandler(this)
 

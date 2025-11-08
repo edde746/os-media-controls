@@ -8,14 +8,15 @@ public class OsMediaControlsPlugin: NSObject, FlutterPlugin, FlutterStreamHandle
     private let commandCenter = MPRemoteCommandCenter.shared()
 
     private var currentMetadata: [String: Any] = [:]
+    private var handlersCleared = false
 
     public static func register(with registrar: FlutterPluginRegistrar) {
         let methodChannel = FlutterMethodChannel(
-            name: "com.example.os_media_controls/methods",
+            name: "com.edde746.os_media_controls/methods",
             binaryMessenger: registrar.messenger
         )
         let eventChannel = FlutterEventChannel(
-            name: "com.example.os_media_controls/events",
+            name: "com.edde746.os_media_controls/events",
             binaryMessenger: registrar.messenger
         )
 
@@ -155,6 +156,8 @@ public class OsMediaControlsPlugin: NSObject, FlutterPlugin, FlutterStreamHandle
     }
 
     private func setMetadata(arguments: [String: Any]?) {
+        ensureHandlersRegistered()
+
         guard let args = arguments else { return }
 
         // Store metadata for later use
@@ -181,15 +184,33 @@ public class OsMediaControlsPlugin: NSObject, FlutterPlugin, FlutterStreamHandle
         if let duration = args["duration"] as? Double {
             nowPlayingInfo[MPMediaItemPropertyPlaybackDuration] = duration
         }
-        if let artworkData = args["artwork"] as? FlutterStandardTypedData,
-           let image = NSImage(data: artworkData.data) {
-            nowPlayingInfo[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+        // Handle artwork from bytes (takes precedence over URL)
+        if let artworkData = args["artwork"] as? FlutterStandardTypedData {
+            if let image = NSImage(data: artworkData.data) {
+                nowPlayingInfo[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+            }
+        } else if let artworkUrlString = args["artworkUrl"] as? String, let artworkUrl = URL(string: artworkUrlString) {
+            // Handle artwork from URL - download asynchronously
+            URLSession.shared.dataTask(with: artworkUrl) { [weak self] data, response, error in
+                guard let self = self else { return }
+                guard error == nil, let data = data, let image = NSImage(data: data) else {
+                    return
+                }
+
+                DispatchQueue.main.async {
+                    var updatedInfo = self.nowPlayingCenter.nowPlayingInfo ?? [:]
+                    updatedInfo[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+                    self.nowPlayingCenter.nowPlayingInfo = updatedInfo
+                }
+            }.resume()
         }
 
         nowPlayingCenter.nowPlayingInfo = nowPlayingInfo
     }
 
     private func setPlaybackState(arguments: [String: Any]?) {
+        ensureHandlersRegistered()
+
         guard let args = arguments,
               let stateString = args["state"] as? String,
               let position = args["position"] as? Double,
@@ -202,6 +223,18 @@ public class OsMediaControlsPlugin: NSObject, FlutterPlugin, FlutterStreamHandle
             stateString == "playing" ? speed : 0.0
 
         nowPlayingCenter.nowPlayingInfo = nowPlayingInfo
+
+        // Set playback state for macOS (required - iOS infers from AVAudioSession)
+        switch stateString {
+        case "playing":
+            nowPlayingCenter.playbackState = .playing
+        case "paused":
+            nowPlayingCenter.playbackState = .paused
+        case "stopped":
+            nowPlayingCenter.playbackState = .stopped
+        default:
+            nowPlayingCenter.playbackState = .unknown
+        }
     }
 
     private func enableControls(arguments: [String]?) {
@@ -289,8 +322,42 @@ public class OsMediaControlsPlugin: NSObject, FlutterPlugin, FlutterStreamHandle
     }
 
     private func clear() {
+        // Set playback state to stopped first
+        nowPlayingCenter.playbackState = .stopped
+
+        // Clear now playing info
         nowPlayingCenter.nowPlayingInfo = nil
         currentMetadata.removeAll()
+
+        // Remove all command targets to fully clean up Control Center
+        commandCenter.playCommand.removeTarget(nil)
+        commandCenter.pauseCommand.removeTarget(nil)
+        commandCenter.togglePlayPauseCommand.removeTarget(nil)
+        commandCenter.nextTrackCommand.removeTarget(nil)
+        commandCenter.previousTrackCommand.removeTarget(nil)
+        commandCenter.changePlaybackPositionCommand.removeTarget(nil)
+        commandCenter.skipForwardCommand.removeTarget(nil)
+        commandCenter.skipBackwardCommand.removeTarget(nil)
+        commandCenter.changePlaybackRateCommand.removeTarget(nil)
+
+        // Disable all commands
+        commandCenter.playCommand.isEnabled = false
+        commandCenter.pauseCommand.isEnabled = false
+        commandCenter.togglePlayPauseCommand.isEnabled = false
+        commandCenter.nextTrackCommand.isEnabled = false
+        commandCenter.previousTrackCommand.isEnabled = false
+        commandCenter.changePlaybackPositionCommand.isEnabled = false
+        commandCenter.skipForwardCommand.isEnabled = false
+        commandCenter.skipBackwardCommand.isEnabled = false
+        commandCenter.changePlaybackRateCommand.isEnabled = false
+
+        handlersCleared = true
+    }
+
+    private func ensureHandlersRegistered() {
+        guard handlersCleared else { return }
+        setupRemoteCommandCenter()
+        handlersCleared = false
     }
 
     private func sendEvent(_ event: [String: Any]) {

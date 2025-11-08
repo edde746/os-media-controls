@@ -1,11 +1,11 @@
 name: os_media_controls
 description: "A new Flutter plugin project."
-version: 0.0.1
+version: 0.0.2
 homepage:
 
 environment:
   sdk: ^3.9.2
-  flutter: '>=3.3.0'
+  flutter: ">=3.3.0"
 
 dependencies:
   flutter:
@@ -35,7 +35,7 @@ flutter:
   plugin:
     platforms:
       android:
-        package: com.example.os_media_controls
+        package: com.edde746.os_media_controls
         pluginClass: OsMediaControlsPlugin
       ios:
         pluginClass: OsMediaControlsPlugin

@@ -26,6 +26,14 @@ class MediaMetadata {
   /// The image will be converted to the appropriate format for each platform.
   final Uint8List? artwork;
 
+  /// The artwork/album art as a URL
+  ///
+  /// If provided, the native platform will download the image asynchronously.
+  /// This is useful when you have a URL with authentication tokens or when
+  /// you want to avoid blocking the UI thread with image downloads.
+  /// If both [artwork] and [artworkUrl] are provided, [artwork] takes precedence.
+  final String? artworkUrl;
+
   const MediaMetadata({
     required this.title,
     this.artist,
@@ -33,6 +41,7 @@ class MediaMetadata {
     this.albumArtist,
     this.duration,
     this.artwork,
+    this.artworkUrl,
   });
 
   /// Converts the metadata to a map for platform channel communication
@@ -44,6 +53,7 @@ class MediaMetadata {
       if (albumArtist != null) 'albumArtist': albumArtist,
       if (duration != null) 'duration': duration!.inSeconds.toDouble(),
       if (artwork != null) 'artwork': artwork,
+      if (artworkUrl != null) 'artworkUrl': artworkUrl,
     };
   }
 

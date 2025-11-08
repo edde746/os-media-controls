@@ -1,15 +1,15 @@
 #include "os_media_controls_plugin.h"
 
+#include <flutter/event_channel.h>
+#include <flutter/event_stream_handler_functions.h>
 #include <flutter/method_channel.h>
 #include <flutter/plugin_registrar_windows.h>
 #include <flutter/standard_method_codec.h>
-#include <flutter/event_channel.h>
-#include <flutter/event_stream_handler_functions.h>
 
-#include <memory>
-#include <sstream>
 #include <codecvt>
 #include <locale>
+#include <memory>
+#include <sstream>
 
 // Additional WinRT headers for SMTC
 #include <SystemMediaTransportControlsInterop.h>
@@ -26,12 +26,12 @@ void OsMediaControlsPlugin::RegisterWithRegistrar(
     flutter::PluginRegistrarWindows *registrar) {
   auto method_channel =
       std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
-          registrar->messenger(), "com.example.os_media_controls/methods",
+          registrar->messenger(), "com.edde746.os_media_controls/methods",
           &flutter::StandardMethodCodec::GetInstance());
 
   auto event_channel =
       std::make_unique<flutter::EventChannel<flutter::EncodableValue>>(
-          registrar->messenger(), "com.example.os_media_controls/events",
+          registrar->messenger(), "com.edde746.os_media_controls/events",
           &flutter::StandardMethodCodec::GetInstance());
 
   auto plugin = std::make_unique<OsMediaControlsPlugin>(registrar);
@@ -42,14 +42,14 @@ void OsMediaControlsPlugin::RegisterWithRegistrar(
       });
 
   auto handler = std::make_unique<flutter::StreamHandlerFunctions<>>(
-      [plugin_pointer = plugin.get()](
-          const flutter::EncodableValue* arguments,
-          std::unique_ptr<flutter::EventSink<>>&& events)
+      [plugin_pointer =
+           plugin.get()](const flutter::EncodableValue *arguments,
+                         std::unique_ptr<flutter::EventSink<>> &&events)
           -> std::unique_ptr<flutter::StreamHandlerError<>> {
         plugin_pointer->event_sink_ = std::move(events);
         return nullptr;
       },
-      [plugin_pointer = plugin.get()](const flutter::EncodableValue* arguments)
+      [plugin_pointer = plugin.get()](const flutter::EncodableValue *arguments)
           -> std::unique_ptr<flutter::StreamHandlerError<>> {
         plugin_pointer->event_sink_.reset();
         return nullptr;
@@ -89,21 +89,19 @@ OsMediaControlsPlugin::~OsMediaControlsPlugin() {
 }
 
 void OsMediaControlsPlugin::InitializeSMTC(HWND hwnd) {
-  if (!hwnd) return;
+  if (!hwnd)
+    return;
 
   try {
     // Get ISystemMediaTransportControlsInterop interface for desktop apps
-    auto interop = winrt::get_activation_factory<
-        SystemMediaTransportControls,
-        ISystemMediaTransportControlsInterop>();
+    auto interop =
+        winrt::get_activation_factory<SystemMediaTransportControls,
+                                      ISystemMediaTransportControlsInterop>();
 
     // Get SMTC instance for this window
     winrt::guid guid = winrt::guid_of<SystemMediaTransportControls>();
-    winrt::check_hresult(interop->GetForWindow(
-        hwnd,
-        guid,
-        winrt::put_abi(smtc_)
-    ));
+    winrt::check_hresult(
+        interop->GetForWindow(hwnd, guid, winrt::put_abi(smtc_)));
 
     // Enable basic controls by default
     smtc_.IsPlayEnabled(true);
@@ -114,27 +112,31 @@ void OsMediaControlsPlugin::InitializeSMTC(HWND hwnd) {
 
     // Register button pressed event handler
     button_pressed_token_ = smtc_.ButtonPressed(
-        [this](SystemMediaTransportControls const&,
-               SystemMediaTransportControlsButtonPressedEventArgs const& args) {
+        [this](SystemMediaTransportControls const &,
+               SystemMediaTransportControlsButtonPressedEventArgs const &args) {
           HandleButtonPressed(args.Button());
         });
 
     // Register playback position change event handler (for seek)
     position_change_token_ = smtc_.PlaybackPositionChangeRequested(
-        [this](SystemMediaTransportControls const&,
-               PlaybackPositionChangeRequestedEventArgs const& args) {
+        [this](SystemMediaTransportControls const &,
+               PlaybackPositionChangeRequestedEventArgs const &args) {
           // Convert TimeSpan (100-nanosecond units) to seconds
-          double positionSeconds = args.RequestedPlaybackPosition().count() / 10000000.0;
+          double positionSeconds =
+              args.RequestedPlaybackPosition().count() / 10000000.0;
 
           flutter::EncodableMap event;
-          event[flutter::EncodableValue("type")] = flutter::EncodableValue("seek");
-          event[flutter::EncodableValue("position")] = flutter::EncodableValue(positionSeconds);
+          event[flutter::EncodableValue("type")] =
+              flutter::EncodableValue("seek");
+          event[flutter::EncodableValue("position")] =
+              flutter::EncodableValue(positionSeconds);
 
           SendEvent(event);
         });
 
-  } catch (winrt::hresult_error const& ex) {
-    // Log error but don't crash - SMTC may not be available on all Windows versions
+  } catch (winrt::hresult_error const &ex) {
+    // Log error but don't crash - SMTC may not be available on all Windows
+    // versions
   }
 }
 
@@ -170,8 +172,8 @@ void OsMediaControlsPlugin::HandleMethodCall(
   } else if (method_name == "enableControls") {
     if (auto args = method_call.arguments()) {
       if (std::holds_alternative<flutter::EncodableList>(*args)) {
-        const auto& list = std::get<flutter::EncodableList>(*args);
-        for (const auto& item : list) {
+        const auto &list = std::get<flutter::EncodableList>(*args);
+        for (const auto &item : list) {
           if (std::holds_alternative<std::string>(item)) {
             EnableControl(std::get<std::string>(item));
           }
@@ -182,8 +184,8 @@ void OsMediaControlsPlugin::HandleMethodCall(
   } else if (method_name == "disableControls") {
     if (auto args = method_call.arguments()) {
       if (std::holds_alternative<flutter::EncodableList>(*args)) {
-        const auto& list = std::get<flutter::EncodableList>(*args);
-        for (const auto& item : list) {
+        const auto &list = std::get<flutter::EncodableList>(*args);
+        for (const auto &item : list) {
           if (std::holds_alternative<std::string>(item)) {
             DisableControl(std::get<std::string>(item));
           }
@@ -214,7 +216,8 @@ void OsMediaControlsPlugin::HandleMethodCall(
 }
 
 void OsMediaControlsPlugin::SetMetadata(const flutter::EncodableValue *args) {
-  if (!args || !std::holds_alternative<flutter::EncodableMap>(*args) || !smtc_) {
+  if (!args || !std::holds_alternative<flutter::EncodableMap>(*args) ||
+      !smtc_) {
     return;
   }
 
@@ -263,13 +266,15 @@ void OsMediaControlsPlugin::SetMetadata(const flutter::EncodableValue *args) {
     // Apply updates
     updater.Update();
 
-  } catch (winrt::hresult_error const& ex) {
+  } catch (winrt::hresult_error const &ex) {
     // Ignore metadata update errors
   }
 }
 
-void OsMediaControlsPlugin::SetPlaybackState(const flutter::EncodableValue *args) {
-  if (!args || !std::holds_alternative<flutter::EncodableMap>(*args) || !smtc_) {
+void OsMediaControlsPlugin::SetPlaybackState(
+    const flutter::EncodableValue *args) {
+  if (!args || !std::holds_alternative<flutter::EncodableMap>(*args) ||
+      !smtc_) {
     return;
   }
 
@@ -313,7 +318,7 @@ void OsMediaControlsPlugin::SetPlaybackState(const flutter::EncodableValue *args
     // Set playback rate
     smtc_.PlaybackRate(speed);
 
-  } catch (winrt::hresult_error const& ex) {
+  } catch (winrt::hresult_error const &ex) {
     // Ignore playback state update errors
   }
 }
@@ -324,35 +329,37 @@ void OsMediaControlsPlugin::HandleButtonPressed(
   flutter::EncodableMap event;
 
   switch (button) {
-    case SystemMediaTransportControlsButton::Play:
-      event[flutter::EncodableValue("type")] = flutter::EncodableValue("play");
-      break;
+  case SystemMediaTransportControlsButton::Play:
+    event[flutter::EncodableValue("type")] = flutter::EncodableValue("play");
+    break;
 
-    case SystemMediaTransportControlsButton::Pause:
-      event[flutter::EncodableValue("type")] = flutter::EncodableValue("pause");
-      break;
+  case SystemMediaTransportControlsButton::Pause:
+    event[flutter::EncodableValue("type")] = flutter::EncodableValue("pause");
+    break;
 
-    case SystemMediaTransportControlsButton::Stop:
-      event[flutter::EncodableValue("type")] = flutter::EncodableValue("stop");
-      break;
+  case SystemMediaTransportControlsButton::Stop:
+    event[flutter::EncodableValue("type")] = flutter::EncodableValue("stop");
+    break;
 
-    case SystemMediaTransportControlsButton::Next:
-      event[flutter::EncodableValue("type")] = flutter::EncodableValue("next");
-      break;
+  case SystemMediaTransportControlsButton::Next:
+    event[flutter::EncodableValue("type")] = flutter::EncodableValue("next");
+    break;
 
-    case SystemMediaTransportControlsButton::Previous:
-      event[flutter::EncodableValue("type")] = flutter::EncodableValue("previous");
-      break;
+  case SystemMediaTransportControlsButton::Previous:
+    event[flutter::EncodableValue("type")] =
+        flutter::EncodableValue("previous");
+    break;
 
-    default:
-      return; // Unknown button
+  default:
+    return; // Unknown button
   }
 
   SendEvent(event);
 }
 
-void OsMediaControlsPlugin::EnableControl(const std::string& control) {
-  if (!smtc_) return;
+void OsMediaControlsPlugin::EnableControl(const std::string &control) {
+  if (!smtc_)
+    return;
 
   try {
     if (control == "play") {
@@ -367,13 +374,14 @@ void OsMediaControlsPlugin::EnableControl(const std::string& control) {
       smtc_.IsPreviousEnabled(true);
     }
     // Note: Windows doesn't have separate seek control enable
-  } catch (winrt::hresult_error const& ex) {
+  } catch (winrt::hresult_error const &ex) {
     // Ignore enable errors
   }
 }
 
-void OsMediaControlsPlugin::DisableControl(const std::string& control) {
-  if (!smtc_) return;
+void OsMediaControlsPlugin::DisableControl(const std::string &control) {
+  if (!smtc_)
+    return;
 
   try {
     if (control == "play") {
@@ -387,13 +395,14 @@ void OsMediaControlsPlugin::DisableControl(const std::string& control) {
     } else if (control == "previous") {
       smtc_.IsPreviousEnabled(false);
     }
-  } catch (winrt::hresult_error const& ex) {
+  } catch (winrt::hresult_error const &ex) {
     // Ignore disable errors
   }
 }
 
-winrt::hstring OsMediaControlsPlugin::StringToHString(const std::string& str) {
-  if (str.empty()) return winrt::hstring();
+winrt::hstring OsMediaControlsPlugin::StringToHString(const std::string &str) {
+  if (str.empty())
+    return winrt::hstring();
 
   // Convert UTF-8 std::string to wide string
   std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
@@ -402,8 +411,9 @@ winrt::hstring OsMediaControlsPlugin::StringToHString(const std::string& str) {
   return winrt::hstring(wide);
 }
 
-RandomAccessStreamReference OsMediaControlsPlugin::CreateStreamReferenceFromBytes(
-    const std::vector<uint8_t>& bytes) {
+RandomAccessStreamReference
+OsMediaControlsPlugin::CreateStreamReferenceFromBytes(
+    const std::vector<uint8_t> &bytes) {
 
   if (bytes.empty()) {
     return nullptr;
@@ -416,9 +426,7 @@ RandomAccessStreamReference OsMediaControlsPlugin::CreateStreamReferenceFromByte
 
     // Write bytes to stream
     writer.WriteBytes(winrt::array_view<const uint8_t>(
-        bytes.data(),
-        bytes.data() + bytes.size()
-    ));
+        bytes.data(), bytes.data() + bytes.size()));
 
     // Store the data (synchronous call - use .get() to wait)
     writer.StoreAsync().get();
@@ -430,7 +438,7 @@ RandomAccessStreamReference OsMediaControlsPlugin::CreateStreamReferenceFromByte
     // Create stream reference
     return RandomAccessStreamReference::CreateFromStream(stream);
 
-  } catch (winrt::hresult_error const& ex) {
+  } catch (winrt::hresult_error const &ex) {
     return nullptr;
   }
 }
@@ -441,8 +449,9 @@ void OsMediaControlsPlugin::SendEvent(const flutter::EncodableMap &event) {
   }
 }
 
-std::string OsMediaControlsPlugin::GetStringFromMap(
-    const flutter::EncodableMap &map, const std::string &key) {
+std::string
+OsMediaControlsPlugin::GetStringFromMap(const flutter::EncodableMap &map,
+                                        const std::string &key) {
   auto it = map.find(flutter::EncodableValue(key));
   if (it != map.end() && std::holds_alternative<std::string>(it->second)) {
     return std::get<std::string>(it->second);
@@ -450,8 +459,8 @@ std::string OsMediaControlsPlugin::GetStringFromMap(
   return "";
 }
 
-double OsMediaControlsPlugin::GetDoubleFromMap(
-    const flutter::EncodableMap &map, const std::string &key) {
+double OsMediaControlsPlugin::GetDoubleFromMap(const flutter::EncodableMap &map,
+                                               const std::string &key) {
   auto it = map.find(flutter::EncodableValue(key));
   if (it != map.end() && std::holds_alternative<double>(it->second)) {
     return std::get<double>(it->second);
@@ -459,4 +468,4 @@ double OsMediaControlsPlugin::GetDoubleFromMap(
   return 0.0;
 }
 
-}  // namespace os_media_controls
+} // namespace os_media_controls

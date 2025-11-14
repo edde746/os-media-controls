@@ -68,6 +68,7 @@ class OsMediaControls {
   /// - [PlayEvent]: Play button pressed
   /// - [PauseEvent]: Pause button pressed
   /// - [StopEvent]: Stop button pressed
+  /// - [TogglePlayPauseEvent]: Toggle play/pause button pressed (iOS/macOS)
   /// - [NextTrackEvent]: Next track button pressed
   /// - [PreviousTrackEvent]: Previous track button pressed
   /// - [SeekEvent]: User seeked to a position

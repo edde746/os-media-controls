@@ -55,8 +55,6 @@ do {
 application.beginReceivingRemoteControlEvents()
 ```
 
-Plugin uses silent audio for controls visibility without real playback.
-
 ### macOS
 
 No extra setup.

@@ -10,10 +10,6 @@ public class OsMediaControlsPlugin: NSObject, FlutterPlugin, FlutterStreamHandle
 
     private var currentMetadata: [String: Any] = [:]
 
-    // Silent audio player for iOS Now Playing controls
-    // iOS requires actual audio playback for controls to appear in Control Center
-    private var silentPlayer: AVAudioPlayer?
-    private var isSilentAudioPlaying = false
 
     public static func register(with registrar: FlutterPluginRegistrar) {
         let methodChannel = FlutterMethodChannel(
@@ -39,7 +35,6 @@ public class OsMediaControlsPlugin: NSObject, FlutterPlugin, FlutterStreamHandle
         }
 
         setupRemoteCommandCenter()
-        setupSilentAudio()
     }
 
     private func setupRemoteCommandCenter() {
@@ -231,14 +226,6 @@ public class OsMediaControlsPlugin: NSObject, FlutterPlugin, FlutterStreamHandle
             stateString == "playing" ? speed : 0.0
 
         nowPlayingCenter.nowPlayingInfo = nowPlayingInfo
-
-        // Start/stop silent audio based on playback state
-        // iOS requires actual audio playback for Now Playing controls to appear
-        if stateString == "playing" || stateString == "paused" {
-            startSilentAudioIfNeeded()
-        } else if stateString == "stopped" || stateString == "none" {
-            stopSilentAudioIfNeeded()
-        }
     }
 
     private func enableControls(arguments: [String]?) {
@@ -328,7 +315,6 @@ public class OsMediaControlsPlugin: NSObject, FlutterPlugin, FlutterStreamHandle
     private func clear() {
         nowPlayingCenter.nowPlayingInfo = nil
         currentMetadata.removeAll()
-        stopSilentAudioIfNeeded()
 
         // Deactivate audio session to force iOS to remove controls from Control Center
         do {
@@ -350,58 +336,6 @@ public class OsMediaControlsPlugin: NSObject, FlutterPlugin, FlutterStreamHandle
         commandCenter.changePlaybackRateCommand.isEnabled = false
     }
 
-    // MARK: - Silent Audio Management
-
-    /// Generates a minimal silent WAV file (44 bytes)
-    /// This is a valid WAV file containing just silence
-    private func generateSilentAudioData() -> Data {
-        let bytes: [UInt8] = [
-            // WAV header
-            0x52, 0x49, 0x46, 0x46, 0x26, 0x00, 0x00, 0x00, 0x57, 0x41, 0x56, 0x45,
-            // fmt chunk
-            0x66, 0x6d, 0x74, 0x20, 0x10, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
-            0x44, 0xac, 0x00, 0x00, 0x88, 0x58, 0x01, 0x00, 0x02, 0x00, 0x10, 0x00,
-            // data chunk (silent)
-            0x64, 0x61, 0x74, 0x61, 0x02, 0x00, 0x00, 0x00, 0xfc, 0xff
-        ]
-        return Data(bytes)
-    }
-
-    /// Sets up the silent audio player
-    /// iOS requires actual audio playback for Now Playing controls to appear
-    private func setupSilentAudio() {
-        do {
-            let silentData = generateSilentAudioData()
-            silentPlayer = try AVAudioPlayer(data: silentData)
-            silentPlayer?.numberOfLoops = -1  // Loop forever
-            silentPlayer?.volume = 0.0001     // Effectively silent (can't be 0.0)
-            silentPlayer?.prepareToPlay()
-        } catch {
-            // Silent audio player setup failed
-        }
-    }
-
-    /// Starts silent audio playback if not already playing
-    /// This keeps iOS engaged and maintains Now Playing controls visibility
-    private func startSilentAudioIfNeeded() {
-        guard !isSilentAudioPlaying else { return }
-
-        guard let player = silentPlayer else {
-            setupSilentAudio()
-            return
-        }
-
-        player.play()
-        isSilentAudioPlaying = true
-    }
-
-    /// Stops silent audio playback if currently playing
-    private func stopSilentAudioIfNeeded() {
-        guard isSilentAudioPlaying else { return }
-
-        silentPlayer?.stop()
-        isSilentAudioPlaying = false
-    }
 
     private func sendEvent(_ event: [String: Any]) {
         eventSink?(event)

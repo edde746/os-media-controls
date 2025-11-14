@@ -36,6 +36,8 @@ abstract class MediaControlEvent {
       case 'setSpeed':
         final speed = (map['speed'] as num).toDouble();
         return SetSpeedEvent(speed);
+      case 'togglePlayPause':
+        return const TogglePlayPauseEvent();
       default:
         throw ArgumentError('Unknown event type: $type');
     }
@@ -64,6 +66,14 @@ class StopEvent extends MediaControlEvent {
 
   @override
   String toString() => 'StopEvent()';
+}
+
+/// Event triggered when the toggle play/pause button is pressed (iOS/macOS)
+class TogglePlayPauseEvent extends MediaControlEvent {
+  const TogglePlayPauseEvent();
+
+  @override
+  String toString() => 'TogglePlayPauseEvent()';
 }
 
 /// Event triggered when the next track button is pressed

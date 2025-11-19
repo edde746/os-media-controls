@@ -1,6 +1,6 @@
 name: os_media_controls
 description: "A new Flutter plugin project."
-version: 0.0.2
+version: 0.1.0
 homepage:
 
 environment:
@@ -43,6 +43,8 @@ flutter:
         pluginClass: OsMediaControlsPlugin
       windows:
         pluginClass: OsMediaControlsPluginCApi
+      linux:
+        pluginClass: OsMediaControlsPlugin
 
   # To add assets to your plugin package, add an assets section, like this:
   # assets:

@@ -451,6 +451,7 @@ class _MediaPlayerPageState extends State<MediaPlayerPage> {
                           const Text('• iOS/macOS: Use Control Center or lock screen'),
                           const Text('• Android: Use notification or quick settings'),
                           const Text('• Windows: Use media keys on keyboard'),
+                          const Text('• Linux: Use GNOME/KDE media controls or keyboard'),
                           const Text('• Watch the event log below for activity!'),
                         ],
                       ),

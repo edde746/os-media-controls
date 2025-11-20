@@ -165,6 +165,13 @@ public class OsMediaControlsPlugin: NSObject, FlutterPlugin, FlutterStreamHandle
     private func setMetadata(arguments: [String: Any]?) {
         guard let args = arguments else { return }
 
+        // Reactivate audio session to ensure media controls work after being cleared
+        do {
+            try AVAudioSession.sharedInstance().setActive(true)
+        } catch {
+            print("Failed to reactivate audio session: \(error)")
+        }
+
         // Store metadata for later use
         for (key, value) in args {
             if key != "artwork" {
@@ -218,6 +225,13 @@ public class OsMediaControlsPlugin: NSObject, FlutterPlugin, FlutterStreamHandle
               let stateString = args["state"] as? String,
               let position = args["position"] as? Double,
               let speed = args["speed"] as? Double else { return }
+
+        // Reactivate audio session to ensure media controls work after being cleared
+        do {
+            try AVAudioSession.sharedInstance().setActive(true)
+        } catch {
+            print("Failed to reactivate audio session: \(error)")
+        }
 
         var nowPlayingInfo = nowPlayingCenter.nowPlayingInfo ?? [:]
 

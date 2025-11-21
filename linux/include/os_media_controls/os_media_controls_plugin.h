@@ -54,6 +54,7 @@ class OsMediaControlsPluginImpl {
   guint media_player_registration_id_;
   guint root_interface_registration_id_;
   GDBusNodeInfo* introspection_data_;
+  bool mpris_initialized_;  // Track if MPRIS initialization succeeded
 
   // Event channel for sending events to Dart
   FlEventChannel* event_channel_;
@@ -140,6 +141,7 @@ class OsMediaControlsPluginImpl {
   double GetDoubleFromFlValue(FlValue* map, const char* key);
   int64_t GetInt64FromFlValue(FlValue* map, const char* key);
   std::vector<uint8_t> GetBytesFromFlValue(FlValue* map, const char* key);
+  GVariant* SafeVariantNewString(const std::string& str);
   std::string SaveArtworkToFile(const std::vector<uint8_t>& data);
   void CreateArtworkDirectory();
   void CleanupArtworkFile(const std::string& path);

@@ -6,6 +6,7 @@
 #include <gio/gio.h>
 
 #include <cstring>
+#include <cmath>
 #include <memory>
 #include <sstream>
 #include <fstream>
@@ -79,31 +80,37 @@ namespace os_media_controls {
 
 // Helper to convert FlValue to string
 std::string OsMediaControlsPluginImpl::GetStringFromFlValue(FlValue* map, const char* key) {
-  if (!map || fl_value_get_type(map) != FL_VALUE_TYPE_MAP) {
+  if (!map || !key || fl_value_get_type(map) != FL_VALUE_TYPE_MAP) {
     return "";
   }
   FlValue* value = fl_value_lookup_string(map, key);
   if (value && fl_value_get_type(value) == FL_VALUE_TYPE_STRING) {
-    return fl_value_get_string(value);
+    const char* str = fl_value_get_string(value);
+    if (str) {
+      return str;
+    }
   }
   return "";
 }
 
 // Helper to convert FlValue to double
 double OsMediaControlsPluginImpl::GetDoubleFromFlValue(FlValue* map, const char* key) {
-  if (!map || fl_value_get_type(map) != FL_VALUE_TYPE_MAP) {
+  if (!map || !key || fl_value_get_type(map) != FL_VALUE_TYPE_MAP) {
     return 0.0;
   }
   FlValue* value = fl_value_lookup_string(map, key);
   if (value && fl_value_get_type(value) == FL_VALUE_TYPE_FLOAT) {
-    return fl_value_get_float(value);
+    double result = fl_value_get_float(value);
+    if (std::isfinite(result)) {
+      return result;
+    }
   }
   return 0.0;
 }
 
 // Helper to convert FlValue to int64
 int64_t OsMediaControlsPluginImpl::GetInt64FromFlValue(FlValue* map, const char* key) {
-  if (!map || fl_value_get_type(map) != FL_VALUE_TYPE_MAP) {
+  if (!map || !key || fl_value_get_type(map) != FL_VALUE_TYPE_MAP) {
     return 0;
   }
   FlValue* value = fl_value_lookup_string(map, key);
@@ -115,16 +122,35 @@ int64_t OsMediaControlsPluginImpl::GetInt64FromFlValue(FlValue* map, const char*
 
 // Helper to get bytes from FlValue
 std::vector<uint8_t> OsMediaControlsPluginImpl::GetBytesFromFlValue(FlValue* map, const char* key) {
-  if (!map || fl_value_get_type(map) != FL_VALUE_TYPE_MAP) {
+  if (!map || !key || fl_value_get_type(map) != FL_VALUE_TYPE_MAP) {
     return {};
   }
   FlValue* value = fl_value_lookup_string(map, key);
   if (value && fl_value_get_type(value) == FL_VALUE_TYPE_UINT8_LIST) {
     const uint8_t* data = fl_value_get_uint8_list(value);
     size_t length = fl_value_get_length(value);
-    return std::vector<uint8_t>(data, data + length);
+    if (data && length > 0) {
+      return std::vector<uint8_t>(data, data + length);
+    }
   }
   return {};
+}
+
+// Helper to safely create GVariant string with UTF-8 validation
+// GLib's g_variant_new_string() aborts the program if the input is not valid UTF-8.
+// This wrapper validates the string first and returns an empty string on failure.
+GVariant* OsMediaControlsPluginImpl::SafeVariantNewString(const std::string& str) {
+  if (str.empty()) {
+    return g_variant_new_string("");
+  }
+
+  // Validate UTF-8
+  if (!g_utf8_validate(str.c_str(), -1, nullptr)) {
+    g_warning("Invalid UTF-8 string detected, using empty string instead");
+    return g_variant_new_string("");
+  }
+
+  return g_variant_new_string(str.c_str());
 }
 
 // Create artwork directory
@@ -150,6 +176,12 @@ std::string OsMediaControlsPluginImpl::SaveArtworkToFile(const std::vector<uint8
     return "";
   }
 
+  // Verify data pointer is valid
+  if (!data.data()) {
+    g_warning("SaveArtworkToFile: data pointer is null");
+    return "";
+  }
+
   // Generate unique filename with timestamp to prevent caching issues
   auto now = std::chrono::system_clock::now();
   auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -161,13 +193,31 @@ std::string OsMediaControlsPluginImpl::SaveArtworkToFile(const std::vector<uint8
 
   // Write data to file
   std::ofstream file(path, std::ios::binary);
-  if (file.is_open()) {
-    file.write(reinterpret_cast<const char*>(data.data()), data.size());
-    file.close();
-    return "file://" + path;
+  if (!file.is_open()) {
+    g_warning("SaveArtworkToFile: failed to open file '%s'", path.c_str());
+    return "";
   }
 
-  return "";
+  file.write(reinterpret_cast<const char*>(data.data()), data.size());
+
+  // Check if write succeeded
+  if (!file.good()) {
+    g_warning("SaveArtworkToFile: failed to write to file '%s'", path.c_str());
+    file.close();
+    // Try to remove the partial file
+    std::remove(path.c_str());
+    return "";
+  }
+
+  file.close();
+
+  // Verify close succeeded
+  if (file.fail()) {
+    g_warning("SaveArtworkToFile: failed to close file '%s'", path.c_str());
+    // File might still be usable even if close reports an error
+  }
+
+  return "file://" + path;
 }
 
 // Clean up a single artwork file
@@ -219,6 +269,7 @@ OsMediaControlsPluginImpl::OsMediaControlsPluginImpl(FlPluginRegistrar* registra
       media_player_registration_id_(0),
       root_interface_registration_id_(0),
       introspection_data_(nullptr),
+      mpris_initialized_(false),
       event_channel_(event_channel ? FL_EVENT_CHANNEL(g_object_ref(event_channel))
                                    : nullptr),
       is_listening_(false),
@@ -262,6 +313,13 @@ void OsMediaControlsPluginImpl::InitializeMPRIS() {
   if (error) {
     g_warning("Failed to connect to session bus: %s", error->message);
     g_error_free(error);
+    mpris_initialized_ = false;
+    return;
+  }
+
+  if (!connection_) {
+    g_warning("Failed to connect to session bus: connection is null");
+    mpris_initialized_ = false;
     return;
   }
 
@@ -270,6 +328,26 @@ void OsMediaControlsPluginImpl::InitializeMPRIS() {
   if (error) {
     g_warning("Failed to parse introspection XML: %s", error->message);
     g_error_free(error);
+    mpris_initialized_ = false;
+    return;
+  }
+
+  if (!introspection_data_) {
+    g_warning("Failed to parse introspection XML: data is null");
+    mpris_initialized_ = false;
+    return;
+  }
+
+  // Verify we have at least 2 interfaces (MediaPlayer2 and MediaPlayer2.Player)
+  if (!introspection_data_->interfaces ||
+      !introspection_data_->interfaces[0] ||
+      !introspection_data_->interfaces[1]) {
+    g_warning("Introspection data does not contain expected interfaces");
+    if (introspection_data_) {
+      g_dbus_node_info_unref(introspection_data_);
+      introspection_data_ = nullptr;
+    }
+    mpris_initialized_ = false;
     return;
   }
 
@@ -293,6 +371,13 @@ void OsMediaControlsPluginImpl::InitializeMPRIS() {
   if (error) {
     g_warning("Failed to register MediaPlayer2 interface: %s", error->message);
     g_error_free(error);
+    mpris_initialized_ = false;
+    return;
+  }
+
+  if (root_interface_registration_id_ == 0) {
+    g_warning("Failed to register MediaPlayer2 interface: registration ID is 0");
+    mpris_initialized_ = false;
     return;
   }
 
@@ -309,6 +394,13 @@ void OsMediaControlsPluginImpl::InitializeMPRIS() {
   if (error) {
     g_warning("Failed to register MediaPlayer2.Player interface: %s", error->message);
     g_error_free(error);
+    mpris_initialized_ = false;
+    return;
+  }
+
+  if (media_player_registration_id_ == 0) {
+    g_warning("Failed to register MediaPlayer2.Player interface: registration ID is 0");
+    mpris_initialized_ = false;
     return;
   }
 
@@ -321,6 +413,10 @@ void OsMediaControlsPluginImpl::InitializeMPRIS() {
       nullptr,
       nullptr,
       nullptr);
+
+  // Mark as successfully initialized
+  mpris_initialized_ = true;
+  g_message("MPRIS interface initialized successfully");
 }
 
 // Cleanup MPRIS
@@ -366,6 +462,19 @@ void OsMediaControlsPluginImpl::HandleMethodCallDBus(
     gpointer user_data) {
 
   auto* self = static_cast<OsMediaControlsPluginImpl*>(user_data);
+  if (!self) {
+    g_dbus_method_invocation_return_error(invocation, G_DBUS_ERROR,
+                                          G_DBUS_ERROR_FAILED,
+                                          "Internal error: null user data");
+    return;
+  }
+
+  if (!interface_name || !method_name) {
+    g_dbus_method_invocation_return_error(invocation, G_DBUS_ERROR,
+                                          G_DBUS_ERROR_INVALID_ARGS,
+                                          "Invalid arguments");
+    return;
+  }
 
   bool is_player_interface =
       g_strcmp0(interface_name, "org.mpris.MediaPlayer2.Player") == 0;
@@ -452,6 +561,17 @@ GVariant* OsMediaControlsPluginImpl::HandleGetProperty(
     gpointer user_data) {
 
   auto* self = static_cast<OsMediaControlsPluginImpl*>(user_data);
+  if (!self) {
+    g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
+                "Internal error: null user data");
+    return nullptr;
+  }
+
+  if (!interface_name || !property_name) {
+    g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
+                "Invalid arguments");
+    return nullptr;
+  }
 
   if (g_strcmp0(interface_name, "org.mpris.MediaPlayer2") == 0) {
     if (g_strcmp0(property_name, "CanQuit") == 0) {
@@ -461,25 +581,31 @@ GVariant* OsMediaControlsPluginImpl::HandleGetProperty(
     } else if (g_strcmp0(property_name, "HasTrackList") == 0) {
       return g_variant_new_boolean(self->has_track_list_);
     } else if (g_strcmp0(property_name, "Identity") == 0) {
-      return g_variant_new_string(self->identity_.c_str());
+      return self->SafeVariantNewString(self->identity_);
     } else if (g_strcmp0(property_name, "SupportedUriSchemes") == 0) {
       GVariantBuilder builder;
       g_variant_builder_init(&builder, G_VARIANT_TYPE("as"));
       for (const auto& scheme : self->supported_uri_schemes_) {
-        g_variant_builder_add(&builder, "s", scheme.c_str());
+        // Validate UTF-8 before adding
+        if (!scheme.empty() && g_utf8_validate(scheme.c_str(), -1, nullptr)) {
+          g_variant_builder_add(&builder, "s", scheme.c_str());
+        }
       }
       return g_variant_builder_end(&builder);
     } else if (g_strcmp0(property_name, "SupportedMimeTypes") == 0) {
       GVariantBuilder builder;
       g_variant_builder_init(&builder, G_VARIANT_TYPE("as"));
       for (const auto& mime : self->supported_mime_types_) {
-        g_variant_builder_add(&builder, "s", mime.c_str());
+        // Validate UTF-8 before adding
+        if (!mime.empty() && g_utf8_validate(mime.c_str(), -1, nullptr)) {
+          g_variant_builder_add(&builder, "s", mime.c_str());
+        }
       }
       return g_variant_builder_end(&builder);
     }
   } else if (g_strcmp0(interface_name, "org.mpris.MediaPlayer2.Player") == 0) {
     if (g_strcmp0(property_name, "PlaybackStatus") == 0) {
-      return g_variant_new_string(self->playback_status_.c_str());
+      return self->SafeVariantNewString(self->playback_status_);
     } else if (g_strcmp0(property_name, "Rate") == 0) {
       return g_variant_new_double(self->rate_);
     } else if (g_strcmp0(property_name, "Position") == 0) {
@@ -504,36 +630,66 @@ GVariant* OsMediaControlsPluginImpl::HandleGetProperty(
       GVariantBuilder builder;
       g_variant_builder_init(&builder, G_VARIANT_TYPE("a{sv}"));
 
-      if (!self->metadata_["title"].empty()) {
+      // Thread safety note: This function (HandleGetProperty) and SetMetadata must run
+      // on the same thread. Currently both run on the GLib main loop thread, preventing
+      // concurrent access to metadata_ map.
+
+      auto title_it = self->metadata_.find("title");
+      if (title_it != self->metadata_.end() && !title_it->second.empty()) {
         g_variant_builder_add(&builder, "{sv}", "xesam:title",
-                             g_variant_new_string(self->metadata_["title"].c_str()));
+                             self->SafeVariantNewString(title_it->second));
       }
-      if (!self->metadata_["artist"].empty()) {
-        GVariantBuilder artist_builder;
-        g_variant_builder_init(&artist_builder, G_VARIANT_TYPE("as"));
-        g_variant_builder_add(&artist_builder, "s", self->metadata_["artist"].c_str());
-        g_variant_builder_add(&builder, "{sv}", "xesam:artist",
-                             g_variant_builder_end(&artist_builder));
+
+      auto artist_it = self->metadata_.find("artist");
+      if (artist_it != self->metadata_.end() && !artist_it->second.empty()) {
+        // Validate UTF-8 before adding to array
+        if (g_utf8_validate(artist_it->second.c_str(), -1, nullptr)) {
+          GVariantBuilder artist_builder;
+          g_variant_builder_init(&artist_builder, G_VARIANT_TYPE("as"));
+          g_variant_builder_add(&artist_builder, "s", artist_it->second.c_str());
+          g_variant_builder_add(&builder, "{sv}", "xesam:artist",
+                               g_variant_builder_end(&artist_builder));
+        }
       }
-      if (!self->metadata_["album"].empty()) {
+
+      auto album_it = self->metadata_.find("album");
+      if (album_it != self->metadata_.end() && !album_it->second.empty()) {
         g_variant_builder_add(&builder, "{sv}", "xesam:album",
-                             g_variant_new_string(self->metadata_["album"].c_str()));
+                             self->SafeVariantNewString(album_it->second));
       }
-      if (!self->metadata_["albumArtist"].empty()) {
-        GVariantBuilder album_artist_builder;
-        g_variant_builder_init(&album_artist_builder, G_VARIANT_TYPE("as"));
-        g_variant_builder_add(&album_artist_builder, "s", self->metadata_["albumArtist"].c_str());
-        g_variant_builder_add(&builder, "{sv}", "xesam:albumArtist",
-                             g_variant_builder_end(&album_artist_builder));
+
+      auto album_artist_it = self->metadata_.find("albumArtist");
+      if (album_artist_it != self->metadata_.end() && !album_artist_it->second.empty()) {
+        // Validate UTF-8 before adding to array
+        if (g_utf8_validate(album_artist_it->second.c_str(), -1, nullptr)) {
+          GVariantBuilder album_artist_builder;
+          g_variant_builder_init(&album_artist_builder, G_VARIANT_TYPE("as"));
+          g_variant_builder_add(&album_artist_builder, "s", album_artist_it->second.c_str());
+          g_variant_builder_add(&builder, "{sv}", "xesam:albumArtist",
+                               g_variant_builder_end(&album_artist_builder));
+        }
       }
-      if (!self->metadata_["duration"].empty()) {
-        double duration = std::stod(self->metadata_["duration"]);
-        g_variant_builder_add(&builder, "{sv}", "mpris:length",
-                             g_variant_new_int64(static_cast<gint64>(duration * 1000000)));
+
+      auto duration_it = self->metadata_.find("duration");
+      if (duration_it != self->metadata_.end() && !duration_it->second.empty()) {
+        try {
+          double duration = std::stod(duration_it->second);
+          if (duration > 0 && std::isfinite(duration)) {
+            g_variant_builder_add(&builder, "{sv}", "mpris:length",
+                                 g_variant_new_int64(static_cast<gint64>(duration * 1000000)));
+          }
+        } catch (const std::invalid_argument& e) {
+          g_warning("Failed to parse duration '%s': invalid argument",
+                   duration_it->second.c_str());
+        } catch (const std::out_of_range& e) {
+          g_warning("Failed to parse duration '%s': out of range",
+                   duration_it->second.c_str());
+        }
       }
+
       if (!self->artwork_path_.empty()) {
         g_variant_builder_add(&builder, "{sv}", "mpris:artUrl",
-                             g_variant_new_string(self->artwork_path_.c_str()));
+                             self->SafeVariantNewString(self->artwork_path_));
       }
 
       g_variant_builder_add(&builder, "{sv}", "mpris:trackid",
@@ -562,6 +718,17 @@ gboolean OsMediaControlsPluginImpl::HandleSetProperty(
     gpointer user_data) {
 
   auto* self = static_cast<OsMediaControlsPluginImpl*>(user_data);
+  if (!self) {
+    g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
+                "Internal error: null user data");
+    return FALSE;
+  }
+
+  if (!property_name || !value) {
+    g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
+                "Invalid arguments");
+    return FALSE;
+  }
 
   if (g_strcmp0(property_name, "Rate") == 0) {
     double rate = g_variant_get_double(value);
@@ -587,7 +754,13 @@ void OsMediaControlsPluginImpl::EmitPropertiesChanged(
     const char* interface_name,
     GVariantBuilder* changed_properties_builder) {
 
-  if (!connection_ || !changed_properties_builder) return;
+  if (!mpris_initialized_ || !connection_ || !changed_properties_builder) {
+    if (changed_properties_builder) {
+      // Clean up the builder if MPRIS is not initialized
+      g_variant_builder_clear(changed_properties_builder);
+    }
+    return;
+  }
 
   g_autoptr(GVariant) changed_properties =
       g_variant_ref_sink(g_variant_builder_end(changed_properties_builder));
@@ -625,7 +798,7 @@ void OsMediaControlsPluginImpl::UpdateMPRISProperties() {
   g_variant_builder_init(&builder, G_VARIANT_TYPE("a{sv}"));
 
   g_variant_builder_add(&builder, "{sv}", "PlaybackStatus",
-                       g_variant_new_string(playback_status_.c_str()));
+                       SafeVariantNewString(playback_status_));
   g_variant_builder_add(&builder, "{sv}", "Rate",
                        g_variant_new_double(rate_));
   g_variant_builder_add(&builder, "{sv}", "CanGoNext",
@@ -644,15 +817,22 @@ void OsMediaControlsPluginImpl::UpdateMPRISProperties() {
 
 // Update metadata property
 void OsMediaControlsPluginImpl::UpdateMetadataProperty() {
+  if (!mpris_initialized_ || !connection_) {
+    return;
+  }
+
   GVariantBuilder builder;
   g_variant_builder_init(&builder, G_VARIANT_TYPE("a{sv}"));
 
-  g_variant_builder_add(&builder, "{sv}", "Metadata",
-                       HandleGetProperty(connection_, nullptr, nullptr,
-                                       "org.mpris.MediaPlayer2.Player",
-                                       "Metadata", nullptr, this));
-
-  EmitPropertiesChanged("org.mpris.MediaPlayer2.Player", &builder);
+  GVariant* metadata = HandleGetProperty(connection_, nullptr, nullptr,
+                                          "org.mpris.MediaPlayer2.Player",
+                                          "Metadata", nullptr, this);
+  if (metadata) {
+    g_variant_builder_add(&builder, "{sv}", "Metadata", metadata);
+    EmitPropertiesChanged("org.mpris.MediaPlayer2.Player", &builder);
+  } else {
+    g_variant_builder_clear(&builder);
+  }
 }
 
 // Handle method calls from Flutter
@@ -691,6 +871,9 @@ void OsMediaControlsPluginImpl::HandleMethodCall(FlMethodCall* method_call) {
 }
 
 // Set metadata
+// Thread safety note: This function modifies the metadata_ map and must run on the same
+// thread as HandleGetProperty (which reads from metadata_). Both functions execute on
+// the GLib main loop thread, ensuring single-threaded access and preventing race conditions.
 void OsMediaControlsPluginImpl::SetMetadata(FlValue* args) {
   if (!args || fl_value_get_type(args) != FL_VALUE_TYPE_MAP) {
     return;
@@ -787,8 +970,17 @@ void OsMediaControlsPluginImpl::EnableControls(FlValue* args) {
   size_t length = fl_value_get_length(args);
   for (size_t i = 0; i < length; i++) {
     FlValue* item = fl_value_get_list_value(args, i);
+    if (!item) {
+      g_warning("EnableControls: null item at index %zu", i);
+      continue;
+    }
+
     if (fl_value_get_type(item) == FL_VALUE_TYPE_STRING) {
       const char* control = fl_value_get_string(item);
+      if (!control) {
+        g_warning("EnableControls: null control string at index %zu", i);
+        continue;
+      }
 
       if (strcmp(control, "play") == 0) {
         can_play_ = true;
@@ -818,8 +1010,17 @@ void OsMediaControlsPluginImpl::DisableControls(FlValue* args) {
   size_t length = fl_value_get_length(args);
   for (size_t i = 0; i < length; i++) {
     FlValue* item = fl_value_get_list_value(args, i);
+    if (!item) {
+      g_warning("DisableControls: null item at index %zu", i);
+      continue;
+    }
+
     if (fl_value_get_type(item) == FL_VALUE_TYPE_STRING) {
       const char* control = fl_value_get_string(item);
+      if (!control) {
+        g_warning("DisableControls: null control string at index %zu", i);
+        continue;
+      }
 
       if (strcmp(control, "play") == 0) {
         can_play_ = false;
@@ -952,6 +1153,16 @@ static void os_media_controls_plugin_dispose(GObject* object) {
   if (self->impl) {
     delete self->impl;
     self->impl = nullptr;
+  }
+
+  if (self->method_channel) {
+    g_object_unref(self->method_channel);
+    self->method_channel = nullptr;
+  }
+
+  if (self->event_channel) {
+    g_object_unref(self->event_channel);
+    self->event_channel = nullptr;
   }
 
   G_OBJECT_CLASS(os_media_controls_plugin_parent_class)->dispose(object);
